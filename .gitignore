@@ -8,7 +8,10 @@
 .env
 .env.local
 .env.production
-credentials/
+credentials/*.json
+credentials/*.pem
+credentials/*.key
+!credentials/.gitkeep
 *.pem
 *.key
 
