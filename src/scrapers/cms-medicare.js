@@ -22,6 +22,7 @@ import * as cheerio from 'cheerio';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import AdmZip from 'adm-zip';
 import config from '../config/index.js';
 
 // Get directory name in ES modules
@@ -250,6 +251,43 @@ function parseCSVLine(line) {
 }
 
 /**
+ * Extract a ZIP file and find the data file inside
+ * @param {string} zipPath - Path to ZIP file
+ * @returns {Promise<string>} Path to extracted data file
+ */
+async function extractZipFile(zipPath) {
+  console.log(`   📦 Extracting ZIP file: ${path.basename(zipPath)}`);
+
+  const extractDir = path.join(DATA_DIR, 'extracted');
+
+  // Clean up previous extraction
+  if (fs.existsSync(extractDir)) {
+    fs.rmSync(extractDir, { recursive: true });
+  }
+  fs.mkdirSync(extractDir, { recursive: true });
+
+  // Extract the ZIP
+  const zip = new AdmZip(zipPath);
+  zip.extractAllTo(extractDir, true);
+
+  // Find the data file inside (CSV or Excel)
+  const files = fs.readdirSync(extractDir);
+  console.log(`   📂 ZIP contents: ${files.join(', ')}`);
+
+  // Prefer XLSX, then CSV, then XLS
+  const dataFile = files.find(f => f.endsWith('.xlsx')) ||
+                   files.find(f => f.endsWith('.csv')) ||
+                   files.find(f => f.endsWith('.xls'));
+
+  if (!dataFile) {
+    throw new Error(`No CSV or Excel file found in ZIP. Contents: ${files.join(', ')}`);
+  }
+
+  console.log(`   ✅ Found data file: ${dataFile}`);
+  return path.join(extractDir, dataFile);
+}
+
+/**
  * Parse enrollment file (auto-detect format)
  * @param {string} filePath - Path to file
  * @returns {Promise<object[]>} Array of row objects
@@ -261,6 +299,10 @@ async function parseEnrollmentFile(filePath) {
     return parseExcelFile(filePath);
   } else if (ext === '.csv') {
     return parseCSVFile(filePath);
+  } else if (ext === '.zip') {
+    // Extract ZIP and parse the file inside
+    const extractedPath = await extractZipFile(filePath);
+    return parseEnrollmentFile(extractedPath);
   } else {
     throw new Error(`Unsupported file format: ${ext}`);
   }
@@ -417,17 +459,22 @@ export async function getLatestCPSCData(year = null, month = null) {
  * Download and parse CPSC files from links
  */
 async function downloadAndParseCPSC(links) {
-  // Find the main CPSC file (usually the largest or first xlsx)
-  const xlsxLink = links.find(l => l.includes('CPSC') && l.endsWith('.xlsx')) ||
+  // Find the main CPSC file - prefer xlsx, then zip, then csv
+  const dataLink = links.find(l => l.toLowerCase().includes('cpsc') && l.endsWith('.xlsx')) ||
+                   links.find(l => l.toLowerCase().includes('cpsc') && l.endsWith('.zip')) ||
                    links.find(l => l.endsWith('.xlsx')) ||
+                   links.find(l => l.endsWith('.zip')) ||
+                   links.find(l => l.endsWith('.csv')) ||
                    links[0];
 
-  if (!xlsxLink) {
+  if (!dataLink) {
     console.log('   ⚠️ No suitable download file found');
     return [];
   }
 
-  const filePath = await downloadFile(xlsxLink);
+  console.log(`   📥 Selected file: ${path.basename(dataLink)}`);
+
+  const filePath = await downloadFile(dataLink);
   if (!filePath) return [];
 
   const rawData = await parseEnrollmentFile(filePath);
