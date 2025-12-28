@@ -1,0 +1,37 @@
+{
+  "name": "payer-universe",
+  "version": "1.0.0",
+  "description": "Healthcare payer database that aggregates data from multiple sources and syncs to Google Sheets",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "import:apollo": "node src/scripts/import-apollo.js",
+    "import:cms": "node src/scripts/import-cms.js",
+    "sync:sheets": "node src/scripts/sync-sheets.js",
+    "refresh": "node src/scripts/refresh-all.js",
+    "test": "echo \"No tests configured yet\" && exit 0"
+  },
+  "keywords": [
+    "healthcare",
+    "payer",
+    "insurance",
+    "google-sheets",
+    "data-aggregation"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.3.1",
+    "fuse.js": "^7.0.0",
+    "googleapis": "^129.0.0",
+    "pg": "^8.11.3"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
