@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
+    "migrate": "node src/scripts/migrate.js",
     "import:apollo": "node src/scripts/import-apollo.js",
     "import:cms": "node src/scripts/import-cms.js",
     "sync:sheets": "node src/scripts/sync-sheets.js",
