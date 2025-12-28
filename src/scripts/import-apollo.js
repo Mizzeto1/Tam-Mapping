@@ -1,20 +1,14 @@
 /**
- * Apollo.io Import Script
+ * Apollo.io Import Script - Companies Only
  *
- * Imports healthcare payer and TPA data from Apollo.io API.
+ * Imports healthcare payer and TPA companies from Apollo.io API.
+ * Skips companies that already exist in the database (saves API credits).
  *
  * Usage:
- *   npm run import:apollo              # Full import
+ *   npm run import:apollo              # Import new companies only (skip existing)
+ *   npm run import:apollo -- --force   # Re-import all (update existing)
  *   npm run import:apollo -- --dry-run # Preview only, no database changes
- *   npm run import:apollo -- --contacts-only # Just refresh contacts
  *   npm run import:apollo -- --query "company name" # Search specific company
- *
- * What this does:
- * 1. Searches Apollo for healthcare payers and TPAs
- * 2. Checks each company against our database (fuzzy matching)
- * 3. Inserts new companies or updates existing ones
- * 4. Separates TPAs from health plans
- * 5. Optionally pulls contacts for good prospects
  */
 
 import config from '../config/index.js';
@@ -25,43 +19,143 @@ import fuzzy from '../utils/fuzzy-match.js';
 // Parse command line arguments
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
-const CONTACTS_ONLY = args.includes('--contacts-only');
+const FORCE_UPDATE = args.includes('--force');
 const QUERY_INDEX = args.indexOf('--query');
 const SPECIFIC_QUERY = QUERY_INDEX !== -1 ? args[QUERY_INDEX + 1] : null;
 
+// Match threshold for fuzzy matching (0.85 = 85% similarity)
+const FUZZY_MATCH_THRESHOLD = 0.85;
+
 // Import statistics
 const stats = {
-  companiesFound: 0,
-  payersAdded: 0,
+  companiesFromApollo: 0,
+  alreadyExist: 0,
+  newPayersAdded: 0,
+  newTpasAdded: 0,
   payersUpdated: 0,
-  tpasAdded: 0,
   tpasUpdated: 0,
-  contactsAdded: 0,
   errors: [],
 };
 
 /**
- * Get existing payers from database for deduplication
+ * Load existing companies from database for deduplication
+ * Includes name and website/domain for matching
  */
-async function getExistingPayers() {
+async function loadExistingCompanies() {
+  const existing = {
+    payers: [],
+    tpas: [],
+    domains: new Set(),
+    normalizedNames: new Map(),
+  };
+
   try {
-    return await db.queryAll('SELECT id, name, apollo_id FROM payers');
+    // Load payers
+    const payers = await db.queryAll(`
+      SELECT id, name, website, apollo_id
+      FROM payers
+    `);
+    existing.payers = payers;
+
+    // Load TPAs
+    const tpas = await db.queryAll(`
+      SELECT id, name, website, apollo_id
+      FROM tpas
+    `);
+    existing.tpas = tpas;
+
+    // Build domain lookup set
+    for (const p of payers) {
+      if (p.website) {
+        const domain = extractDomain(p.website);
+        if (domain) existing.domains.add(domain.toLowerCase());
+      }
+      // Add normalized name to map
+      const normalized = fuzzy.normalizeName(p.name);
+      existing.normalizedNames.set(normalized, { type: 'payer', id: p.id, name: p.name });
+    }
+
+    for (const t of tpas) {
+      if (t.website) {
+        const domain = extractDomain(t.website);
+        if (domain) existing.domains.add(domain.toLowerCase());
+      }
+      const normalized = fuzzy.normalizeName(t.name);
+      existing.normalizedNames.set(normalized, { type: 'tpa', id: t.id, name: t.name });
+    }
+
+    console.log(`   Loaded ${payers.length} payers, ${tpas.length} TPAs`);
+    console.log(`   Known domains: ${existing.domains.size}`);
+
   } catch (error) {
-    console.log('⚠️  Could not load existing payers (database may not be set up)');
-    return [];
+    console.log('⚠️  Could not load existing companies (database may not be set up)');
+  }
+
+  return existing;
+}
+
+/**
+ * Extract domain from URL
+ */
+function extractDomain(url) {
+  if (!url) return null;
+  try {
+    // Handle URLs without protocol
+    if (!url.startsWith('http')) {
+      url = 'https://' + url;
+    }
+    const urlObj = new URL(url);
+    return urlObj.hostname.replace(/^www\./, '');
+  } catch {
+    // If URL parsing fails, try basic extraction
+    return url.replace(/^(https?:\/\/)?(www\.)?/, '').split('/')[0];
   }
 }
 
 /**
- * Get existing TPAs from database for deduplication
+ * Check if a company already exists in our database
+ * Returns { exists: boolean, match?: object }
  */
-async function getExistingTPAs() {
-  try {
-    return await db.queryAll('SELECT id, name, apollo_id FROM tpas');
-  } catch (error) {
-    console.log('⚠️  Could not load existing TPAs (database may not be set up)');
-    return [];
+function companyExists(apolloCompany, existingData) {
+  // 1. Check Apollo ID match
+  const apolloId = apolloCompany.apolloId;
+  if (apolloId) {
+    const payerMatch = existingData.payers.find(p => p.apollo_id === apolloId);
+    if (payerMatch) return { exists: true, match: payerMatch, type: 'payer', reason: 'apollo_id' };
+
+    const tpaMatch = existingData.tpas.find(t => t.apollo_id === apolloId);
+    if (tpaMatch) return { exists: true, match: tpaMatch, type: 'tpa', reason: 'apollo_id' };
   }
+
+  // 2. Check domain match
+  const companyDomain = extractDomain(apolloCompany.website);
+  if (companyDomain && existingData.domains.has(companyDomain.toLowerCase())) {
+    return { exists: true, reason: 'domain' };
+  }
+
+  // 3. Check exact normalized name match
+  const normalizedName = fuzzy.normalizeName(apolloCompany.name);
+  if (existingData.normalizedNames.has(normalizedName)) {
+    const match = existingData.normalizedNames.get(normalizedName);
+    return { exists: true, match, type: match.type, reason: 'exact_name' };
+  }
+
+  // 4. Fuzzy name match (>85% similarity)
+  const allCompanies = [...existingData.payers, ...existingData.tpas];
+  const fuzzyMatch = fuzzy.findBestMatch(apolloCompany.name, allCompanies);
+
+  if (fuzzyMatch && fuzzyMatch.score <= (1 - FUZZY_MATCH_THRESHOLD)) {
+    // Fuse.js score: 0 = perfect match, 1 = no match
+    // So score <= 0.15 means >= 85% match
+    return {
+      exists: true,
+      match: fuzzyMatch.match,
+      reason: 'fuzzy_name',
+      similarity: Math.round((1 - fuzzyMatch.score) * 100) + '%'
+    };
+  }
+
+  return { exists: false };
 }
 
 /**
@@ -71,9 +165,8 @@ async function insertPayer(company) {
   const result = await db.query(`
     INSERT INTO payers (
       name, parent_company, type, states, employee_count,
-      core_system, core_system_source, website, linkedin_url,
-      apollo_id, data_sources
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      website, linkedin_url, apollo_id, data_sources
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING id
   `, [
     company.name,
@@ -81,12 +174,10 @@ async function insertPayer(company) {
     company.type,
     company.states,
     company.employeeCount,
-    company.coreSystem,
-    company.coreSystemSource,
     company.website,
     company.linkedinUrl,
     company.apolloId,
-    company.dataSources,
+    ['Apollo'],
   ]);
 
   return result.rows[0]?.id;
@@ -102,11 +193,12 @@ async function updatePayer(id, company) {
       linkedin_url = COALESCE(linkedin_url, $3),
       apollo_id = COALESCE(apollo_id, $4),
       employee_count = COALESCE(employee_count, $5),
-      states = CASE
-        WHEN states = '{}' THEN $6
-        ELSE states
+      states = CASE WHEN states = '{}' THEN $6 ELSE states END,
+      data_sources = CASE
+        WHEN NOT ('Apollo' = ANY(data_sources))
+        THEN array_append(data_sources, 'Apollo')
+        ELSE data_sources
       END,
-      data_sources = array_cat(data_sources, $7),
       updated_at = NOW()
     WHERE id = $1
   `, [
@@ -116,7 +208,6 @@ async function updatePayer(id, company) {
     company.apolloId,
     company.employeeCount,
     company.states,
-    ['Apollo'],
   ]);
 }
 
@@ -127,9 +218,9 @@ async function insertTPA(company, tpaInfo) {
   const result = await db.query(`
     INSERT INTO tpas (
       name, parent_company, type, states, employee_count,
-      core_system, core_system_source, website, linkedin_url,
-      apollo_id, data_sources, is_healthcare_focused, healthcare_keywords_found
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      website, linkedin_url, apollo_id, data_sources,
+      is_healthcare_focused, healthcare_keywords_found
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     RETURNING id
   `, [
     company.name,
@@ -137,12 +228,10 @@ async function insertTPA(company, tpaInfo) {
     company.type,
     company.states,
     company.employeeCount,
-    company.coreSystem,
-    company.coreSystemSource,
     company.website,
     company.linkedinUrl,
     company.apolloId,
-    company.dataSources,
+    ['Apollo'],
     tpaInfo.isHealthcareFocused,
     tpaInfo.healthcareKeywords,
   ]);
@@ -161,8 +250,11 @@ async function updateTPA(id, company, tpaInfo) {
       apollo_id = COALESCE(apollo_id, $4),
       employee_count = COALESCE(employee_count, $5),
       is_healthcare_focused = COALESCE(is_healthcare_focused, $6),
-      healthcare_keywords_found = array_cat(healthcare_keywords_found, $7),
-      data_sources = array_cat(data_sources, $8),
+      data_sources = CASE
+        WHEN NOT ('Apollo' = ANY(data_sources))
+        THEN array_append(data_sources, 'Apollo')
+        ELSE data_sources
+      END,
       updated_at = NOW()
     WHERE id = $1
   `, [
@@ -172,87 +264,57 @@ async function updateTPA(id, company, tpaInfo) {
     company.apolloId,
     company.employeeCount,
     tpaInfo.isHealthcareFocused,
-    tpaInfo.healthcareKeywords,
-    ['Apollo'],
-  ]);
-}
-
-/**
- * Insert a contact into the database
- */
-async function insertContact(contact, payerId, tpaId) {
-  await db.query(`
-    INSERT INTO contacts (payer_id, tpa_id, name, title, email, phone, linkedin_url, source)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    ON CONFLICT DO NOTHING
-  `, [
-    payerId,
-    tpaId,
-    contact.name,
-    contact.title,
-    contact.email,
-    contact.phone,
-    contact.linkedinUrl,
-    contact.source,
   ]);
 }
 
 /**
  * Process a single company from Apollo
  */
-async function processCompany(company, existingPayers, existingTPAs) {
+async function processCompany(company, existingData) {
   const tpaInfo = apollo.checkIfTPA(company);
-
-  // Determine if this is a TPA or a payer
   const isTPA = tpaInfo.isTPA;
 
-  // Find existing match
-  const existingList = isTPA ? existingTPAs : existingPayers;
-  const match = fuzzy.findBestMatch(company.name, existingList);
+  // Check if company already exists
+  const existCheck = companyExists(company, existingData);
 
-  // Check for Apollo ID match as well
-  let apolloMatch = null;
-  if (company.apolloId) {
-    apolloMatch = existingList.find(e => e.apollo_id === company.apolloId);
-  }
-
-  const existingMatch = apolloMatch || match?.match;
-
-  if (DRY_RUN) {
-    const action = existingMatch ? 'UPDATE' : 'ADD';
-    const type = isTPA ? 'TPA' : 'Payer';
-    console.log(`   [${action}] ${type}: ${company.name}`);
-    if (tpaInfo.healthcareKeywords.length) {
-      console.log(`      Keywords: ${tpaInfo.healthcareKeywords.join(', ')}`);
+  if (existCheck.exists && !FORCE_UPDATE) {
+    stats.alreadyExist++;
+    if (DRY_RUN) {
+      console.log(`   [SKIP] ${company.name} (${existCheck.reason}${existCheck.similarity ? ': ' + existCheck.similarity : ''})`);
     }
     return null;
   }
 
-  try {
-    let entityId;
+  if (DRY_RUN) {
+    const action = existCheck.exists ? 'UPDATE' : 'ADD';
+    const type = isTPA ? 'TPA' : 'Payer';
+    console.log(`   [${action}] ${type}: ${company.name}`);
+    return null;
+  }
 
-    if (isTPA) {
-      if (existingMatch) {
-        await updateTPA(existingMatch.id, company, tpaInfo);
+  try {
+    if (existCheck.exists && FORCE_UPDATE && existCheck.match) {
+      // Update existing record
+      if (isTPA) {
+        await updateTPA(existCheck.match.id, company, tpaInfo);
         stats.tpasUpdated++;
-        entityId = existingMatch.id;
       } else {
-        entityId = await insertTPA(company, tpaInfo);
-        stats.tpasAdded++;
-      }
-    } else {
-      if (existingMatch) {
-        await updatePayer(existingMatch.id, company);
+        await updatePayer(existCheck.match.id, company);
         stats.payersUpdated++;
-        entityId = existingMatch.id;
+      }
+      return existCheck.match.id;
+    } else {
+      // Insert new record
+      if (isTPA) {
+        const id = await insertTPA(company, tpaInfo);
+        stats.newTpasAdded++;
+        return id;
       } else {
-        entityId = await insertPayer(company);
-        stats.payersAdded++;
+        const id = await insertPayer(company);
+        stats.newPayersAdded++;
+        return id;
       }
     }
-
-    return { id: entityId, isTPA };
-
   } catch (error) {
     stats.errors.push(`${company.name}: ${error.message}`);
     console.error(`   ❌ Error processing ${company.name}: ${error.message}`);
@@ -261,40 +323,15 @@ async function processCompany(company, existingPayers, existingTPAs) {
 }
 
 /**
- * Import contacts for a company
- */
-async function importContacts(companyId, companyName, payerId, tpaId) {
-  try {
-    const contacts = await apollo.getContacts(companyId, companyName);
-
-    for (const contact of contacts) {
-      if (DRY_RUN) {
-        console.log(`      Contact: ${contact.name} - ${contact.title}`);
-      } else {
-        await insertContact(contact, payerId, tpaId);
-        stats.contactsAdded++;
-      }
-    }
-
-    return contacts.length;
-  } catch (error) {
-    console.error(`   ❌ Error getting contacts: ${error.message}`);
-    return 0;
-  }
-}
-
-/**
  * Run a single search query
  */
 async function runSearchQuery(query) {
-  console.log(`\n📋 Running query: ${query.name}`);
-  console.log(`   Industry: ${query.industry || 'Any'}`);
-  console.log(`   Keywords: ${query.keywords?.join(', ') || 'None'}`);
+  console.log(`\n📋 Query: ${query.name}`);
 
   const companies = await apollo.searchCompanies({
     industry: query.industry,
     keywords: query.keywords,
-    maxPages: 5, // Limit per query to stay within API limits
+    maxPages: 5,
   });
 
   return companies;
@@ -304,15 +341,17 @@ async function runSearchQuery(query) {
  * Main import function
  */
 async function runImport() {
-  console.log('🚀 Apollo.io Import');
-  console.log('===================\n');
+  console.log('🚀 APOLLO.IO IMPORT (Companies Only)');
+  console.log('=====================================\n');
 
   if (DRY_RUN) {
-    console.log('⚠️  DRY RUN MODE - No changes will be made to the database\n');
+    console.log('⚠️  DRY RUN MODE - No changes will be made\n');
   }
 
-  if (CONTACTS_ONLY) {
-    console.log('📇 CONTACTS ONLY MODE - Only refreshing contacts for existing companies\n');
+  if (FORCE_UPDATE) {
+    console.log('⚠️  FORCE MODE - Will update existing companies\n');
+  } else {
+    console.log('📋 Mode: Skip existing companies (saves API credits)\n');
   }
 
   // Check Apollo API key
@@ -321,7 +360,7 @@ async function runImport() {
     console.log('\n   To use Apollo import:');
     console.log('   1. Sign up at https://www.apollo.io/');
     console.log('   2. Get your API key from Settings > API');
-    console.log('   3. Add APOLLO_API_KEY to your .env file\n');
+    console.log('   3. Add APOLLO_API_KEY to Railway environment variables\n');
     process.exit(1);
   }
 
@@ -330,15 +369,13 @@ async function runImport() {
   const dbConnected = await db.testConnection();
 
   if (!dbConnected && !DRY_RUN) {
-    console.error('❌ Cannot connect to database. Run migrations first: npm run migrate');
+    console.error('❌ Cannot connect to database. Run migrations first.');
     process.exit(1);
   }
 
-  // Get existing data for deduplication
-  const existingPayers = await getExistingPayers();
-  const existingTPAs = await getExistingTPAs();
-  console.log(`   Existing payers: ${existingPayers.length}`);
-  console.log(`   Existing TPAs: ${existingTPAs.length}`);
+  // Load existing companies for deduplication
+  console.log('\n📊 Loading existing companies for deduplication...');
+  const existingData = await loadExistingCompanies();
 
   let allCompanies = [];
 
@@ -346,29 +383,7 @@ async function runImport() {
   if (SPECIFIC_QUERY) {
     console.log(`\n🔍 Searching for: "${SPECIFIC_QUERY}"`);
     allCompanies = await apollo.searchCompanyByQuery(SPECIFIC_QUERY);
-  }
-  // Handle contacts-only mode
-  else if (CONTACTS_ONLY) {
-    // Get companies that have Apollo IDs but might need contact refresh
-    const payersWithApollo = await db.queryAll(
-      'SELECT id, name, apollo_id FROM payers WHERE apollo_id IS NOT NULL'
-    );
-    const tpasWithApollo = await db.queryAll(
-      'SELECT id, name, apollo_id FROM tpas WHERE apollo_id IS NOT NULL'
-    );
-
-    console.log(`\n📇 Refreshing contacts for ${payersWithApollo.length} payers and ${tpasWithApollo.length} TPAs...`);
-
-    for (const payer of payersWithApollo) {
-      await importContacts(payer.apollo_id, payer.name, payer.id, null);
-    }
-
-    for (const tpa of tpasWithApollo) {
-      await importContacts(tpa.apollo_id, tpa.name, null, tpa.id);
-    }
-  }
-  // Full import mode
-  else {
+  } else {
     // Run all healthcare queries
     for (const query of apollo.HEALTHCARE_QUERIES) {
       const companies = await runSearchQuery(query);
@@ -381,39 +396,30 @@ async function runImport() {
       if (company.apolloId && !uniqueCompanies.has(company.apolloId)) {
         uniqueCompanies.set(company.apolloId, company);
       } else if (!company.apolloId) {
-        // No Apollo ID, use name as key
         const key = fuzzy.normalizeName(company.name);
         if (!uniqueCompanies.has(key)) {
           uniqueCompanies.set(key, company);
         }
       }
     }
-
     allCompanies = Array.from(uniqueCompanies.values());
   }
 
-  stats.companiesFound = allCompanies.length;
-  console.log(`\n📊 Found ${allCompanies.length} unique companies to process\n`);
+  stats.companiesFromApollo = allCompanies.length;
+  console.log(`\n📊 Found ${allCompanies.length} companies from Apollo\n`);
 
   // Process each company
-  if (!CONTACTS_ONLY) {
-    console.log('Processing companies...\n');
+  console.log('Processing companies...\n');
 
-    for (let i = 0; i < allCompanies.length; i++) {
-      const company = allCompanies[i];
-      const progress = `[${i + 1}/${allCompanies.length}]`;
+  for (let i = 0; i < allCompanies.length; i++) {
+    const company = allCompanies[i];
+    const progress = `[${i + 1}/${allCompanies.length}]`;
 
+    if (!DRY_RUN) {
       console.log(`${progress} ${company.name}`);
-
-      const result = await processCompany(company, existingPayers, existingTPAs);
-
-      // For promising companies (50+ employees), also get contacts
-      if (result && company.employeeCount >= 50) {
-        const payerId = result.isTPA ? null : result.id;
-        const tpaId = result.isTPA ? result.id : null;
-        await importContacts(company.apolloId, company.name, payerId, tpaId);
-      }
     }
+
+    await processCompany(company, existingData);
   }
 
   // Log import to database
@@ -424,41 +430,44 @@ async function runImport() {
         VALUES ($1, $2, $3, $4, $5, NOW())
       `, [
         'Apollo',
-        stats.companiesFound,
-        stats.payersAdded + stats.tpasAdded,
+        stats.companiesFromApollo,
+        stats.newPayersAdded + stats.newTpasAdded,
         stats.payersUpdated + stats.tpasUpdated,
-        stats.errors.slice(0, 10), // Limit errors stored
+        stats.errors.slice(0, 10),
       ]);
-    } catch (error) {
-      console.log('⚠️  Could not log import (import_logs table may not exist)');
+    } catch {
+      // import_logs table might not exist
     }
   }
 
   // Print summary
   console.log('\n' + '='.repeat(50));
-  console.log('📊 IMPORT SUMMARY');
+  console.log('📊 APOLLO IMPORT SUMMARY');
   console.log('='.repeat(50));
-  console.log(`Companies found:    ${stats.companiesFound}`);
-  console.log(`Payers added:       ${stats.payersAdded}`);
-  console.log(`Payers updated:     ${stats.payersUpdated}`);
-  console.log(`TPAs added:         ${stats.tpasAdded}`);
-  console.log(`TPAs updated:       ${stats.tpasUpdated}`);
-  console.log(`Contacts added:     ${stats.contactsAdded}`);
-  console.log(`Errors:             ${stats.errors.length}`);
+  console.log(`Companies found in Apollo:  ${stats.companiesFromApollo}`);
+  console.log(`Already in database:        ${stats.alreadyExist} (skipped)`);
+  console.log(`New payers added:           ${stats.newPayersAdded}`);
+  console.log(`New TPAs added:             ${stats.newTpasAdded}`);
+
+  if (FORCE_UPDATE) {
+    console.log(`Payers updated:             ${stats.payersUpdated}`);
+    console.log(`TPAs updated:               ${stats.tpasUpdated}`);
+  }
+
+  console.log(`Errors:                     ${stats.errors.length}`);
 
   if (stats.errors.length > 0) {
     console.log('\n❌ Errors:');
-    for (const error of stats.errors.slice(0, 10)) {
+    for (const error of stats.errors.slice(0, 5)) {
       console.log(`   - ${error}`);
     }
-    if (stats.errors.length > 10) {
-      console.log(`   ... and ${stats.errors.length - 10} more`);
+    if (stats.errors.length > 5) {
+      console.log(`   ... and ${stats.errors.length - 5} more`);
     }
   }
 
   if (DRY_RUN) {
     console.log('\n⚠️  This was a dry run. No changes were made.');
-    console.log('   Run without --dry-run to actually import data.');
   }
 
   console.log('');
