@@ -10,6 +10,7 @@
     "migrate": "node src/scripts/migrate.js",
     "import:apollo": "node src/scripts/import-apollo.js",
     "import:cms": "node src/scripts/import-cms.js",
+    "import:cms:medicare": "node src/scripts/import-cms-medicare.js",
     "sync:sheets": "node src/scripts/sync-sheets.js",
     "refresh": "node src/scripts/refresh-all.js",
     "test:sheets": "node src/scripts/test-sheets.js",
@@ -30,7 +31,8 @@
     "dotenv": "^16.3.1",
     "fuse.js": "^7.0.0",
     "googleapis": "^129.0.0",
-    "pg": "^8.11.3"
+    "pg": "^8.11.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {},
   "engines": {
