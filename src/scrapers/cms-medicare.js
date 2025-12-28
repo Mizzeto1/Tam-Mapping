@@ -251,6 +251,33 @@ function parseCSVLine(line) {
 }
 
 /**
+ * Recursively find a data file (CSV/Excel) in a directory
+ * @param {string} dir - Directory to search
+ * @returns {string|null} Full path to data file or null
+ */
+function findDataFileRecursive(dir) {
+  const items = fs.readdirSync(dir, { withFileTypes: true });
+
+  for (const item of items) {
+    const fullPath = path.join(dir, item.name);
+
+    if (item.isDirectory()) {
+      // Recursively search subdirectories
+      const found = findDataFileRecursive(fullPath);
+      if (found) return found;
+    } else if (
+      item.name.endsWith('.xlsx') ||
+      item.name.endsWith('.csv') ||
+      item.name.endsWith('.xls')
+    ) {
+      return fullPath;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Extract a ZIP file and find the data file inside
  * @param {string} zipPath - Path to ZIP file
  * @returns {Promise<string>} Path to extracted data file
@@ -266,25 +293,32 @@ async function extractZipFile(zipPath) {
   }
   fs.mkdirSync(extractDir, { recursive: true });
 
-  // Extract the ZIP
+  // Extract the ZIP and show contents
   const zip = new AdmZip(zipPath);
-  zip.extractAllTo(extractDir, true);
+  const entries = zip.getEntries();
+  console.log(`   📂 ZIP contains ${entries.length} entries`);
 
-  // Find the data file inside (CSV or Excel)
-  const files = fs.readdirSync(extractDir);
-  console.log(`   📂 ZIP contents: ${files.join(', ')}`);
-
-  // Prefer XLSX, then CSV, then XLS
-  const dataFile = files.find(f => f.endsWith('.xlsx')) ||
-                   files.find(f => f.endsWith('.csv')) ||
-                   files.find(f => f.endsWith('.xls'));
-
-  if (!dataFile) {
-    throw new Error(`No CSV or Excel file found in ZIP. Contents: ${files.join(', ')}`);
+  // Show first few entries for debugging
+  entries.slice(0, 5).forEach(e => {
+    console.log(`      - ${e.entryName} (${e.isDirectory ? 'folder' : 'file'})`);
+  });
+  if (entries.length > 5) {
+    console.log(`      ... and ${entries.length - 5} more`);
   }
 
-  console.log(`   ✅ Found data file: ${dataFile}`);
-  return path.join(extractDir, dataFile);
+  zip.extractAllTo(extractDir, true);
+
+  // Recursively find the data file (may be in a subfolder)
+  const dataFile = findDataFileRecursive(extractDir);
+
+  if (!dataFile) {
+    // List everything for debugging
+    const allItems = fs.readdirSync(extractDir, { recursive: true });
+    throw new Error(`No CSV or Excel file found in ZIP. Contents: ${allItems.join(', ')}`);
+  }
+
+  console.log(`   ✅ Found data file: ${path.basename(dataFile)}`);
+  return dataFile;
 }
 
 /**
