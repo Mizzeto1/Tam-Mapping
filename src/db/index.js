@@ -3,6 +3,9 @@
  *
  * This module handles connecting to PostgreSQL and provides
  * helper functions for running queries.
+ *
+ * Railway provides DATABASE_URL automatically when you add Postgres.
+ * SSL is required for Railway Postgres connections.
  */
 
 import pg from 'pg';
@@ -19,15 +22,22 @@ let pool = null;
  */
 export function getPool() {
   if (!pool) {
-    pool = new Pool({
+    const poolConfig = {
       connectionString: config.database.url,
-      // SSL required for Railway and most cloud databases
-      ssl: config.isProd ? { rejectUnauthorized: false } : false,
-      // Connection pool settings
-      max: 10,              // Maximum connections in pool
-      idleTimeoutMillis: 30000,  // Close idle connections after 30s
-      connectionTimeoutMillis: 2000,  // Fail if can't connect in 2s
-    });
+      // Connection pool settings from config
+      max: config.database.pool.max,
+      idleTimeoutMillis: config.database.pool.idleTimeoutMillis,
+      connectionTimeoutMillis: config.database.pool.connectionTimeoutMillis,
+    };
+
+    // SSL configuration for Railway and cloud databases
+    if (config.database.ssl) {
+      poolConfig.ssl = {
+        rejectUnauthorized: false, // Required for Railway self-signed certs
+      };
+    }
+
+    pool = new Pool(poolConfig);
 
     // Log connection events in development
     if (config.isDev) {
@@ -36,8 +46,18 @@ export function getPool() {
       });
     }
 
+    // Log errors (in both dev and prod)
     pool.on('error', (err) => {
-      console.error('📦 Database: Unexpected error on idle client', err);
+      if (config.isProd) {
+        console.error(JSON.stringify({
+          timestamp: new Date().toISOString(),
+          level: 'error',
+          message: 'Database pool error',
+          error: err.message,
+        }));
+      } else {
+        console.error('📦 Database: Unexpected error on idle client', err);
+      }
     });
   }
 

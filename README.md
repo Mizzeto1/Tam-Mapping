@@ -202,9 +202,123 @@ payer-universe/
 
 ---
 
-## Deployment (Railway)
+## Deploying to Railway
 
-Coming soon! This project is designed to run on Railway for scheduled data refreshes.
+Railway makes it easy to deploy and run scheduled data refreshes.
+
+### Step 1: Create a Railway Account
+
+1. Go to [railway.app](https://railway.app)
+2. Sign up with GitHub (recommended)
+3. Create a new project
+
+### Step 2: Add PostgreSQL Database
+
+1. In your Railway project, click **"+ New"**
+2. Select **"Database"** → **"PostgreSQL"**
+3. Wait for it to provision (takes ~30 seconds)
+4. Railway automatically sets `DATABASE_URL` for your app
+
+### Step 3: Deploy Your Code
+
+**Option A: Deploy from GitHub (Recommended)**
+1. Click **"+ New"** → **"GitHub Repo"**
+2. Select this repository
+3. Railway auto-detects Node.js and deploys
+
+**Option B: Deploy via CLI**
+```bash
+# Install Railway CLI
+npm install -g @railway/cli
+
+# Login
+railway login
+
+# Link to your project
+railway link
+
+# Deploy
+railway up
+```
+
+### Step 4: Set Environment Variables
+
+In Railway dashboard, go to your service → **Variables** tab:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GOOGLE_SHEET_ID` | Yes | Your Google Sheet ID |
+| `GOOGLE_CREDENTIALS` | Yes | Full JSON content of service account file |
+| `APOLLO_API_KEY` | No | Apollo.io API key (if using) |
+
+**Important:** For `GOOGLE_CREDENTIALS`, paste the **entire contents** of your `google-service-account.json` file as the value.
+
+### Step 5: Run Migrations
+
+After deploying, run migrations to set up the database:
+
+```bash
+# Via Railway CLI
+railway run npm run migrate
+
+# Or in Railway dashboard: Settings → Run Command
+```
+
+### Step 6: Test the Connection
+
+```bash
+railway run npm run test:sheets
+```
+
+### Step 7: Set Up Scheduled Refresh (Cron)
+
+Railway supports cron jobs for scheduled tasks:
+
+1. Go to your service → **Settings**
+2. Find **"Cron Schedule"**
+3. Set a schedule like `0 6 * * *` (daily at 6 AM UTC)
+4. Set the command: `npm run refresh`
+
+Common cron schedules:
+- `0 6 * * *` - Daily at 6 AM UTC
+- `0 6 * * 1` - Weekly on Monday at 6 AM UTC
+- `0 */6 * * *` - Every 6 hours
+
+### Manual Refresh
+
+Trigger a manual refresh anytime:
+
+```bash
+# Via CLI
+railway run npm run refresh
+
+# Or specific imports
+railway run npm run import:cms
+railway run npm run sync:sheets
+```
+
+### Viewing Logs
+
+1. Go to Railway dashboard
+2. Click on your service
+3. Select **"Logs"** tab
+4. Logs are in JSON format for easy parsing
+
+### Troubleshooting Railway
+
+**"Database connection failed"**
+- Make sure PostgreSQL is provisioned in your project
+- Check that `DATABASE_URL` is set (Railway does this automatically)
+- Run migrations: `railway run npm run migrate`
+
+**"Permission denied" on Google Sheets**
+- Verify `GOOGLE_CREDENTIALS` contains valid JSON
+- Make sure the sheet is shared with the service account email
+- Check the email in the JSON: `client_email` field
+
+**"Build failed"**
+- Check that `package.json` is valid
+- Ensure Node.js version >= 18 (set in `engines` field)
 
 ---
 

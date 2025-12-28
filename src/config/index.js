@@ -3,12 +3,21 @@
  *
  * This file loads environment variables and provides
  * them in a structured way to the rest of the application.
+ *
+ * Railway auto-provides:
+ *   - DATABASE_URL (PostgreSQL connection string)
+ *   - RAILWAY_ENVIRONMENT (production, staging, etc.)
+ *   - PORT (for web services)
  */
 
 import dotenv from 'dotenv';
 
 // Load .env file (only needed in development)
 dotenv.config();
+
+// Detect Railway environment
+const isRailway = !!process.env.RAILWAY_ENVIRONMENT;
+const isProd = process.env.NODE_ENV === 'production' || isRailway;
 
 /**
  * Validates that required environment variables are set
@@ -20,17 +29,14 @@ function validateEnv(required) {
   if (missing.length > 0) {
     console.error('❌ Missing required environment variables:');
     missing.forEach(key => console.error(`   - ${key}`));
-    console.error('\n📝 Copy .env.example to .env and fill in your values');
+    console.error('\n📝 Set these in Railway dashboard or .env file');
     process.exit(1);
   }
 }
 
-// Check for critical variables
-const requiredVars = ['GOOGLE_SHEET_ID'];
-
-// Only validate in production or when explicitly running sync
-if (process.env.NODE_ENV === 'production') {
-  validateEnv(requiredVars);
+// Check for critical variables in production
+if (isProd) {
+  validateEnv(['GOOGLE_SHEET_ID', 'DATABASE_URL']);
 }
 
 /**
@@ -39,9 +45,13 @@ if (process.env.NODE_ENV === 'production') {
  */
 const config = {
   // Environment
-  env: process.env.NODE_ENV || 'development',
-  isDev: process.env.NODE_ENV !== 'production',
-  isProd: process.env.NODE_ENV === 'production',
+  env: process.env.NODE_ENV || (isRailway ? 'production' : 'development'),
+  isDev: !isProd,
+  isProd,
+  isRailway,
+
+  // Server (for health checks)
+  port: parseInt(process.env.PORT, 10) || 3000,
 
   // Google Sheets
   google: {
@@ -57,9 +67,17 @@ const config = {
     hasApiKey: !!process.env.APOLLO_API_KEY,
   },
 
-  // Database
+  // Database (Railway provides DATABASE_URL automatically)
   database: {
     url: process.env.DATABASE_URL || 'postgresql://localhost:5432/payer_universe',
+    // Railway Postgres requires SSL
+    ssl: isProd,
+    // Connection pool settings
+    pool: {
+      max: parseInt(process.env.DB_POOL_MAX, 10) || 10,
+      idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT, 10) || 30000,
+      connectionTimeoutMillis: parseInt(process.env.DB_CONNECT_TIMEOUT, 10) || 5000,
+    },
   },
 
   // CMS Data Sources
@@ -76,7 +94,9 @@ const config = {
 
   // Logging
   logging: {
-    level: process.env.LOG_LEVEL || 'info',
+    level: process.env.LOG_LEVEL || (isProd ? 'info' : 'debug'),
+    // JSON logs in production for Railway log aggregation
+    format: isProd ? 'json' : 'pretty',
   },
 };
 

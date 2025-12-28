@@ -1,0 +1,21 @@
+# Railway Deployment Configuration
+# https://docs.railway.app/deploy/config-as-code
+
+[build]
+# Install dependencies
+builder = "nixpacks"
+
+[deploy]
+# Start command - runs the main entry point
+startCommand = "npm start"
+
+# Health check (optional - for web services)
+# healthcheckPath = "/health"
+# healthcheckTimeout = 30
+
+# Number of restart attempts
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# Runtime settings
+numReplicas = 1
