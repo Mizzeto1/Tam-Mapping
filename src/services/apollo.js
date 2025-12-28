@@ -51,9 +51,7 @@ function createClient() {
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-cache',
-    },
-    params: {
-      api_key: config.apollo.apiKey,
+      'X-Api-Key': config.apollo.apiKey,
     },
   });
 }
