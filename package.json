@@ -13,6 +13,7 @@
     "import:cms:medicare": "node src/scripts/import-cms-medicare.js",
     "import:cms:medicaid": "node src/scripts/import-cms-medicaid.js",
     "classify:tpas": "node src/scripts/classify-tpas.js",
+    "detect:systems": "node src/scripts/detect-core-systems.js",
     "sync:sheets": "node src/scripts/sync-sheets.js",
     "refresh": "node src/scripts/refresh-all.js",
     "test:sheets": "node src/scripts/test-sheets.js",
