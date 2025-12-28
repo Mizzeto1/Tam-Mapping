@@ -23,7 +23,7 @@ import config from '../config/index.js';
 const APOLLO_BASE_URL = 'https://api.apollo.io/v1';
 
 // Rate limiting settings (50 requests/minute = ~1.2 seconds between requests)
-const RATE_LIMIT_DELAY_MS = 1500; // 1.5 seconds to be safe
+const RATE_LIMIT_DELAY_MS = 1000; // 1 second between requests
 const MAX_RETRIES = 3;
 const RETRY_BACKOFF_MS = 5000; // 5 seconds initial backoff
 
@@ -267,7 +267,7 @@ export async function searchCompanies(options = {}) {
   const query = options.query || '';
 
   console.log(`🔍 Searching: "${query}"`);
-  console.log(`   Employee filter: 100 - 10,000`);
+  console.log(`   Filter: 100-10,000 employees (US only)`);
 
   let page = 1;
   let hasMore = true;
@@ -472,28 +472,12 @@ export async function getAccountInfo() {
  * These are the terms you'd type in Apollo's web search
  */
 export const HEALTHCARE_QUERIES = [
-  // Health Plans & Insurers (mid-size focus)
+  // Only 4 essential queries to complete under Railway's 30s timeout
+  // CMS data already covers Medicare/Medicaid plans
   { name: 'Health Insurance', query: 'health insurance' },
   { name: 'Health Plan', query: 'health plan' },
-  { name: 'Blue Cross Blue Shield', query: 'blue cross blue shield' }, // Some regional BCBS are mid-size
-
-  // Managed Care
-  { name: 'Managed Care', query: 'managed care' },
-  { name: 'HMO', query: 'hmo health' },
-  { name: 'PPO', query: 'ppo health' },
-
-  // Medicare & Medicaid
-  { name: 'Medicare Advantage', query: 'medicare advantage' },
-  { name: 'Medicare Health', query: 'medicare health plan' },
-  { name: 'Medicaid Plan', query: 'medicaid health plan' },
-
-  // TPAs & Benefits Admin
-  { name: 'Third Party Administrator', query: 'third party administrator' },
-  { name: 'TPA Healthcare', query: 'tpa healthcare' },
-  { name: 'Claims Administrator', query: 'claims administrator' },
-  { name: 'Benefits Administration', query: 'benefits administration healthcare' },
-  { name: 'Self Funded', query: 'self funded health' },
-  { name: 'Stop Loss', query: 'stop loss insurance' },
+  { name: 'Managed Care', query: 'managed care organization' },
+  { name: 'TPA', query: 'third party administrator health' },
 ];
 
 /**
