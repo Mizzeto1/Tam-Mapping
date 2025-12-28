@@ -322,6 +322,86 @@ railway run npm run sync:sheets
 
 ---
 
+## Google Sheets Menu (Control from Your Sheet)
+
+Instead of using the command line, you can control everything from a custom menu in Google Sheets!
+
+### Step 1: Add REFRESH_KEY to Railway
+
+1. Go to Railway dashboard → Your service → **Variables**
+2. Add a new variable:
+   - **Name:** `REFRESH_KEY`
+   - **Value:** A random secret string (e.g., `my-secret-key-12345`)
+3. Save and wait for redeploy
+
+### Step 2: Get Your Railway URL
+
+1. In Railway dashboard → Your service → **Settings**
+2. Go to **Networking** → **Public Networking**
+3. Click **"Generate Domain"** if you don't have one
+4. Copy the URL (e.g., `https://your-app.up.railway.app`)
+
+### Step 3: Add the Apps Script to Your Sheet
+
+1. Open your Google Sheet
+2. Go to **Extensions** → **Apps Script**
+3. Delete any existing code
+4. Copy the contents of `google-apps-script/Code.gs` from this repo
+5. Update the CONFIG section at the top:
+   ```javascript
+   const CONFIG = {
+     RAILWAY_URL: "https://your-app.up.railway.app",  // Your Railway URL
+     REFRESH_KEY: "my-secret-key-12345",              // Same as Railway env var
+     TIMEOUT: 300,
+   };
+   ```
+6. Click **Save** (Ctrl+S)
+7. Close the Apps Script tab
+8. **Refresh your Google Sheet**
+
+### Step 4: Use the Menu
+
+After refreshing, you'll see a new menu called **"Payer Universe"** with options:
+
+| Menu Item | What It Does |
+|-----------|--------------|
+| Check Status | Shows database status and record counts |
+| Run Full Refresh | Imports all data and syncs to sheet |
+| Import from Apollo | Imports Apollo.io data only |
+| Import from CMS | Imports CMS Medicare/Medicaid data only |
+| Sync to Sheets | Syncs database to Google Sheets |
+| Classify TPAs | Classifies TPAs as healthcare/non-healthcare |
+| Run Migrations | Sets up database tables |
+| View Last Job | Shows recent job history |
+
+### First Time Setup
+
+When you first deploy, use the menu to:
+1. **Check Status** - Verify connection works
+2. **Run Migrations** - Set up database tables
+3. **Run Full Refresh** - Import data and populate your sheet
+
+---
+
+## API Endpoints
+
+The server exposes these HTTP endpoints (for advanced use):
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /` | Health check (no auth) |
+| `GET /status?key=XXX` | Database status and counts |
+| `GET /migrate?key=XXX` | Run database migrations |
+| `GET /refresh?key=XXX` | Full data refresh |
+| `GET /import/apollo?key=XXX` | Import from Apollo |
+| `GET /import/cms?key=XXX` | Import from CMS |
+| `GET /sync?key=XXX` | Sync to Google Sheets |
+| `GET /classify?key=XXX` | Classify TPAs |
+
+Replace `XXX` with your `REFRESH_KEY` value.
+
+---
+
 ## Security Notes
 
 ⚠️ **Never commit these files:**
