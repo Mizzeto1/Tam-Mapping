@@ -15,7 +15,7 @@
     "classify:tpas": "node src/scripts/classify-tpas.js",
     "detect:systems": "node src/scripts/detect-core-systems.js",
     "sync:sheets": "node src/scripts/sync-sheets.js",
-    "refresh": "node src/scripts/refresh-all.js",
+    "refresh": "node src/scripts/refresh.js",
     "test:sheets": "node src/scripts/test-sheets.js",
     "test": "echo \"No tests configured yet\" && exit 0"
   },
