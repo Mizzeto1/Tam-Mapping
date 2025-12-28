@@ -47,6 +47,8 @@ const config = {
   google: {
     sheetId: process.env.GOOGLE_SHEET_ID,
     credentialsPath: process.env.GOOGLE_APPLICATION_CREDENTIALS || './credentials/google-service-account.json',
+    // For Railway: paste the entire JSON content into GOOGLE_CREDENTIALS env var
+    credentialsJson: process.env.GOOGLE_CREDENTIALS || null,
   },
 
   // Apollo.io API
