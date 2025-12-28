@@ -10,10 +10,12 @@
  *
  * Individual importers:
  *   npm run import:cms:medicare     # Medicare Advantage data only
+ *   npm run import:cms:medicaid     # Medicaid MCO data only
  *
  * Data sources:
  *   - Medicare Advantage enrollment (CPSC data)
- *   - More coming: Medicaid MCOs, ACA exchange plans
+ *   - Medicaid MCO enrollment (data.medicaid.gov)
+ *   - More coming: ACA exchange plans
  */
 
 import { spawn } from 'child_process';
@@ -34,8 +36,12 @@ const IMPORTERS = [
     script: 'import-cms-medicare.js',
     description: 'Medicare Advantage enrollment from CPSC files',
   },
+  {
+    name: 'Medicaid MCOs',
+    script: 'import-cms-medicaid.js',
+    description: 'State Medicaid MCO enrollment from data.medicaid.gov',
+  },
   // Future importers:
-  // { name: 'Medicaid MCOs', script: 'import-cms-medicaid.js', description: 'State Medicaid MCO data' },
   // { name: 'ACA Exchange', script: 'import-cms-aca.js', description: 'Health Insurance Exchange data' },
 ];
 

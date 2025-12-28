@@ -11,6 +11,7 @@
     "import:apollo": "node src/scripts/import-apollo.js",
     "import:cms": "node src/scripts/import-cms.js",
     "import:cms:medicare": "node src/scripts/import-cms-medicare.js",
+    "import:cms:medicaid": "node src/scripts/import-cms-medicaid.js",
     "sync:sheets": "node src/scripts/sync-sheets.js",
     "refresh": "node src/scripts/refresh-all.js",
     "test:sheets": "node src/scripts/test-sheets.js",
