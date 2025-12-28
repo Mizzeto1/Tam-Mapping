@@ -326,12 +326,11 @@ async function processCompany(company, existingData) {
  * Run a single search query
  */
 async function runSearchQuery(query) {
-  console.log(`\n📋 Query: ${query.name}`);
+  console.log(`\n📋 Query: ${query.name} ("${query.query}")`);
 
   const companies = await apollo.searchCompanies({
-    industry: query.industry,
-    keywords: query.keywords,
-    maxPages: 5,
+    query: query.query,
+    maxPages: 3, // 3 pages x 100 results = 300 per query
   });
 
   return companies;
@@ -362,6 +361,23 @@ async function runImport() {
     console.log('   2. Get your API key from Settings > API');
     console.log('   3. Add APOLLO_API_KEY to Railway environment variables\n');
     process.exit(1);
+  }
+
+  // Test Apollo API connection
+  console.log('🔌 Testing Apollo API connection...');
+  const connectionTest = await apollo.testConnection();
+
+  if (!connectionTest.success) {
+    console.error(`❌ Apollo API connection failed: ${connectionTest.message}`);
+    if (connectionTest.details) {
+      console.error(`   Details: ${JSON.stringify(connectionTest.details)}`);
+    }
+    process.exit(1);
+  }
+
+  console.log(`✅ ${connectionTest.message}`);
+  if (connectionTest.details) {
+    console.log(`   Test query returned ${connectionTest.details.organizationsInTest} of ${connectionTest.details.totalAvailable} available`);
   }
 
   // Test database connection

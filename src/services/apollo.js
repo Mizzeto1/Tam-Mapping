@@ -255,30 +255,26 @@ function normalizeContact(person, companyName) {
 // ============================================
 
 /**
- * Search for companies matching criteria
+ * Search for companies using a query string
+ * Uses q_organization_name for reliable keyword-based searches
  * @param {object} options - Search options
- * @param {string} options.industry - Industry filter
- * @param {string[]} options.keywords - Keyword filters
- * @param {number} options.employeeCountMin - Minimum employees
- * @param {number} options.employeeCountMax - Maximum employees
- * @param {string} options.location - Location filter (country/state)
- * @param {number} options.maxPages - Maximum pages to fetch
+ * @param {string} options.query - Search query (company name/keywords)
+ * @param {number} options.maxPages - Maximum pages to fetch (default: 5)
  * @returns {Promise<object[]>} Array of normalized companies
  */
 export async function searchCompanies(options = {}) {
   const client = createClient();
   const companies = [];
-  const maxPages = options.maxPages || MAX_PAGES;
+  const maxPages = options.maxPages || 5;
+  const query = options.query || '';
 
-  console.log(`🔍 Searching companies...`);
-  if (options.industry) console.log(`   Industry: ${options.industry}`);
-  if (options.keywords?.length) console.log(`   Keywords: ${options.keywords.join(', ')}`);
+  console.log(`🔍 Searching: "${query}"`);
 
   let page = 1;
   let hasMore = true;
 
   while (hasMore && page <= maxPages) {
-    console.log(`   Fetching page ${page}...`);
+    console.log(`   Page ${page}/${maxPages}...`);
 
     const body = {
       page,
@@ -286,45 +282,24 @@ export async function searchCompanies(options = {}) {
       organization_locations: ['United States'],
     };
 
-    // Add industry filter
-    if (options.industry) {
-      body.organization_industry_tag_ids = [options.industry];
+    // Use q_organization_name for keyword search (this is what Apollo's web UI uses)
+    if (query) {
+      body.q_organization_name = query;
     }
 
-    // Add keyword filters
-    if (options.keywords?.length) {
-      body.q_organization_keyword_tags = options.keywords;
-    }
-
-    // Add employee count filter
-    if (options.employeeCountMin || options.employeeCountMax) {
-      body.organization_num_employees_ranges = [];
-      // Apollo uses predefined ranges like "1,10", "11,20", etc.
-      // We'll add the ranges that match our criteria
-      const ranges = [
-        '1,10', '11,20', '21,50', '51,100', '101,200',
-        '201,500', '501,1000', '1001,2000', '2001,5000',
-        '5001,10000', '10001,50000', '50001,100000', '100001,500000'
-      ];
-
-      for (const range of ranges) {
-        const [min, max] = range.split(',').map(Number);
-        if ((!options.employeeCountMin || max >= options.employeeCountMin) &&
-            (!options.employeeCountMax || min <= options.employeeCountMax)) {
-          body.organization_num_employees_ranges.push(range);
-        }
-      }
-    }
+    console.log(`   Request body: ${JSON.stringify(body)}`);
 
     try {
       const data = await makeRequest(() =>
         client.post('/mixed_companies/search', body)
       );
 
+      console.log(`   Response: ${data.organizations?.length || 0} organizations, pagination: ${JSON.stringify(data.pagination || {})}`);
+
       const pageCompanies = (data.organizations || []).map(normalizeCompany);
       companies.push(...pageCompanies);
 
-      console.log(`   Found ${pageCompanies.length} companies on page ${page}`);
+      console.log(`   ✓ Found ${pageCompanies.length} companies on page ${page}`);
 
       // Check if there are more pages
       const pagination = data.pagination || {};
@@ -333,11 +308,15 @@ export async function searchCompanies(options = {}) {
 
     } catch (error) {
       console.error(`   ❌ Error on page ${page}: ${error.message}`);
+      if (error.response) {
+        console.error(`   Response status: ${error.response.status}`);
+        console.error(`   Response data: ${JSON.stringify(error.response.data)}`);
+      }
       break;
     }
   }
 
-  console.log(`   Total: ${companies.length} companies found`);
+  console.log(`   Total: ${companies.length} companies found for "${query}"`);
   return companies;
 }
 
@@ -481,40 +460,108 @@ export async function getAccountInfo() {
 
 /**
  * Pre-defined search queries for healthcare payers
- * Each query targets a specific segment of the market
+ * Each query is a simple string that works with q_organization_name
+ * These are the terms you'd type in Apollo's web search
  */
 export const HEALTHCARE_QUERIES = [
-  {
-    name: 'Health Plans - General',
-    industry: 'insurance',
-    keywords: ['health plan', 'health insurance'],
-  },
-  {
-    name: 'Managed Care Organizations',
-    industry: 'health, wellness & fitness',
-    keywords: ['managed care', 'mco', 'hmo', 'ppo'],
-  },
-  {
-    name: 'Medicare Advantage Plans',
-    industry: 'insurance',
-    keywords: ['medicare advantage', 'medicare', 'ma plan'],
-  },
-  {
-    name: 'Medicaid Plans',
-    industry: 'insurance',
-    keywords: ['medicaid', 'state health plan'],
-  },
-  {
-    name: 'Third Party Administrators',
-    industry: 'insurance',
-    keywords: ['third party administrator', 'tpa', 'claims administrator'],
-  },
-  {
-    name: 'Benefits Administrators',
-    industry: 'human resources',
-    keywords: ['benefits administration', 'employee benefits', 'self-funded'],
-  },
+  // Health Plans & Insurers
+  { name: 'Health Insurance', query: 'health insurance' },
+  { name: 'Health Plan', query: 'health plan' },
+  { name: 'Blue Cross Blue Shield', query: 'blue cross blue shield' },
+  { name: 'Anthem', query: 'anthem health' },
+  { name: 'Cigna', query: 'cigna' },
+  { name: 'Aetna', query: 'aetna' },
+  { name: 'Humana', query: 'humana' },
+  { name: 'Kaiser', query: 'kaiser permanente' },
+
+  // Managed Care
+  { name: 'Managed Care', query: 'managed care' },
+  { name: 'HMO', query: 'hmo health' },
+  { name: 'PPO', query: 'ppo health' },
+
+  // Medicare & Medicaid
+  { name: 'Medicare Advantage', query: 'medicare advantage' },
+  { name: 'Medicare Health', query: 'medicare health plan' },
+  { name: 'Medicaid Plan', query: 'medicaid health plan' },
+  { name: 'Dual Eligible', query: 'dual eligible health' },
+
+  // TPAs & Benefits Admin
+  { name: 'Third Party Administrator', query: 'third party administrator' },
+  { name: 'TPA Healthcare', query: 'tpa healthcare' },
+  { name: 'Claims Administrator', query: 'claims administrator' },
+  { name: 'Benefits Administration', query: 'benefits administration healthcare' },
+  { name: 'Self Funded', query: 'self funded health' },
+  { name: 'Stop Loss', query: 'stop loss insurance' },
 ];
+
+/**
+ * Test Apollo API connection
+ * Makes a minimal API call to verify credentials work
+ * @returns {Promise<{success: boolean, message: string, details?: object}>}
+ */
+export async function testConnection() {
+  console.log('🔌 Testing Apollo API connection...');
+
+  if (!config.apollo.apiKey) {
+    return {
+      success: false,
+      message: 'APOLLO_API_KEY is not configured',
+    };
+  }
+
+  console.log(`   API Key: ${config.apollo.apiKey.substring(0, 8)}...`);
+
+  try {
+    const client = createClient();
+
+    // Make a minimal search request (1 result)
+    const body = {
+      page: 1,
+      per_page: 1,
+      q_organization_name: 'test',
+      organization_locations: ['United States'],
+    };
+
+    console.log('   Making test request to /mixed_companies/search...');
+
+    const response = await client.post('/mixed_companies/search', body);
+
+    console.log(`   Response status: ${response.status}`);
+    console.log(`   Organizations found: ${response.data?.organizations?.length || 0}`);
+    console.log(`   Pagination: ${JSON.stringify(response.data?.pagination || {})}`);
+
+    return {
+      success: true,
+      message: 'Apollo API connection successful',
+      details: {
+        status: response.status,
+        organizationsInTest: response.data?.organizations?.length || 0,
+        totalAvailable: response.data?.pagination?.total_entries || 0,
+      },
+    };
+  } catch (error) {
+    console.error(`   ❌ Connection failed: ${error.message}`);
+
+    if (error.response) {
+      console.error(`   Response status: ${error.response.status}`);
+      console.error(`   Response data: ${JSON.stringify(error.response.data)}`);
+
+      return {
+        success: false,
+        message: `API error: ${error.response.status} - ${error.response.data?.message || 'Unknown error'}`,
+        details: {
+          status: error.response.status,
+          error: error.response.data,
+        },
+      };
+    }
+
+    return {
+      success: false,
+      message: `Network error: ${error.message}`,
+    };
+  }
+}
 
 export default {
   searchCompanies,
@@ -522,6 +569,7 @@ export default {
   getContacts,
   getAccountInfo,
   checkIfTPA,
+  testConnection,
   normalizeCompany,
   normalizeContact,
   HEALTHCARE_QUERIES,
