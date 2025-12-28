@@ -344,8 +344,19 @@ async function main() {
   // Test database connection
   console.log('\n📦 Testing database connection...');
   const dbConnected = await db.testConnection();
-  if (!dbConnected) {
-    console.log('⚠️  Database not connected. Call /migrate to set up.');
+
+  if (dbConnected) {
+    // Auto-run migrations on startup (safe to run multiple times)
+    console.log('\n🗄️  Running database migrations...');
+    try {
+      await runScript('migrate.js');
+      console.log('✅ Migrations complete');
+    } catch (error) {
+      console.log('⚠️  Migration warning:', error.message);
+      // Don't fail startup - migrations might have already run
+    }
+  } else {
+    console.log('⚠️  Database not connected. Will retry when requests come in.');
   }
 
   // Start HTTP server
