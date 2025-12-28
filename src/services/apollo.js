@@ -263,10 +263,11 @@ function normalizeContact(person, companyName) {
 export async function searchCompanies(options = {}) {
   const client = createClient();
   const companies = [];
-  const maxPages = options.maxPages || 5;
+  const maxPages = options.maxPages || 2; // Reduced to avoid Railway timeout
   const query = options.query || '';
 
   console.log(`🔍 Searching: "${query}"`);
+  console.log(`   Employee filter: 100 - 10,000`);
 
   let page = 1;
   let hasMore = true;
@@ -278,6 +279,15 @@ export async function searchCompanies(options = {}) {
       page,
       per_page: DEFAULT_PAGE_SIZE,
       organization_locations: ['United States'],
+      // Filter to mid-size companies (100-10,000 employees)
+      organization_num_employees_ranges: [
+        '101,200',
+        '201,500',
+        '501,1000',
+        '1001,2000',
+        '2001,5000',
+        '5001,10000'
+      ],
     };
 
     // Use q_organization_name for keyword search (this is what Apollo's web UI uses)
@@ -462,15 +472,10 @@ export async function getAccountInfo() {
  * These are the terms you'd type in Apollo's web search
  */
 export const HEALTHCARE_QUERIES = [
-  // Health Plans & Insurers
+  // Health Plans & Insurers (mid-size focus)
   { name: 'Health Insurance', query: 'health insurance' },
   { name: 'Health Plan', query: 'health plan' },
-  { name: 'Blue Cross Blue Shield', query: 'blue cross blue shield' },
-  { name: 'Anthem', query: 'anthem health' },
-  { name: 'Cigna', query: 'cigna' },
-  { name: 'Aetna', query: 'aetna' },
-  { name: 'Humana', query: 'humana' },
-  { name: 'Kaiser', query: 'kaiser permanente' },
+  { name: 'Blue Cross Blue Shield', query: 'blue cross blue shield' }, // Some regional BCBS are mid-size
 
   // Managed Care
   { name: 'Managed Care', query: 'managed care' },
@@ -481,7 +486,6 @@ export const HEALTHCARE_QUERIES = [
   { name: 'Medicare Advantage', query: 'medicare advantage' },
   { name: 'Medicare Health', query: 'medicare health plan' },
   { name: 'Medicaid Plan', query: 'medicaid health plan' },
-  { name: 'Dual Eligible', query: 'dual eligible health' },
 
   // TPAs & Benefits Admin
   { name: 'Third Party Administrator', query: 'third party administrator' },
